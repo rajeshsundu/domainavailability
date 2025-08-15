@@ -1,11 +1,6 @@
 
 import { GoogleGenAI, Type } from '@google/genai';
 
-// Vercel Edge Functions environment config
-export const config = {
-  runtime: 'edge',
-};
-
 // Helper to write Server-Sent Events to the stream
 function writeToStream(encoder, writer, event, data) {
     const jsonString = JSON.stringify({ event, data });
