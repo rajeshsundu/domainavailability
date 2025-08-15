@@ -28,7 +28,7 @@ let isProcessingCancelled = false;
 let availableDomains = [];
 
 // --- API Configuration ---
-const API_ORCHESTRATOR_URL = '/api/orchestrator';
+const API_ORCHESTRator_URL = '/api/orchestrator';
 
 // --- Mode Switching Logic ---
 function setMode(mode) {
@@ -186,6 +186,15 @@ csvUploadInput.addEventListener('change', (event) => {
     reader.onerror = () => { alert('Error reading the file.'); };
     reader.readAsText(file);
     input.value = ''; // Allow re-uploading the same file
+});
+
+// Add event listener to normalize domains on blur for better UX
+domainInput.addEventListener('blur', () => {
+    const rawDomains = domainInput.value.split('\n').map(d => d.trim()).filter(Boolean);
+    if (rawDomains.length > 0) {
+        const normalizedDomains = [...new Set(rawDomains.map(normalizeDomain))];
+        domainInput.value = normalizedDomains.join('\n');
+    }
 });
 
 
