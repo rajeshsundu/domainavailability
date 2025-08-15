@@ -9,13 +9,9 @@ const analyzeButton = document.getElementById('analyze-button');
 const cancelButton = document.getElementById('cancel-button');
 const buttonText = analyzeButton.querySelector('.button-text');
 const spinner = analyzeButton.querySelector('.spinner');
-const summaryContainer = document.getElementById('summary');
 const placeholderResults = document.getElementById('placeholder-results');
 const resultsView = document.getElementById('results-view');
 const actionsContainer = document.getElementById('actions-container');
-const progressContainer = document.getElementById('progress-container');
-const progressBar = document.getElementById('progress-bar');
-
 
 // Mode switching elements
 const modeCheckerButton = document.getElementById('mode-checker');
@@ -29,6 +25,7 @@ const csvUploadInput = document.getElementById('csv-upload');
 // --- State ---
 let currentMode = 'checker';
 let isProcessingCancelled = false;
+let availableDomains = [];
 
 // --- API Configuration ---
 const API_ORCHESTRATOR_URL = '/api/orchestrator';
@@ -81,12 +78,12 @@ analyzeButton.addEventListener('click', async () => {
 
     if (currentMode === 'checker') {
         const rawDomains = domainInput.value.split('\n').map(d => d.trim()).filter(Boolean);
-        const domains = [...new Set(rawDomains.map(normalizeDomain))];
-        if (domains.length === 0) {
-            alert("Please paste a list of domains.");
+        if (rawDomains.length === 0) {
+            alert("Please paste or upload a list of domains.");
             setLoading(false);
             return;
         }
+        const domains = [...new Set(rawDomains.map(normalizeDomain))];
         requestBody = { mode: 'checker', domains };
     } else { // Generator mode
         const keywords = keywordsInput.value;
@@ -110,15 +107,10 @@ analyzeButton.addEventListener('click', async () => {
             const errorText = await response.text();
             console.error('Backend Error Response:', errorText);
             let errorMessage = `The server returned an error (${response.status}). Please check the server logs on Vercel for more details.`;
-            // Try to parse it as JSON, as our function might return a valid JSON error
             try {
                 const errorJson = JSON.parse(errorText);
-                if (errorJson.error) {
-                    errorMessage = errorJson.error;
-                }
-            } catch (e) {
-                // It wasn't a JSON error, stick with the generic message.
-            }
+                if (errorJson.error) { errorMessage = errorJson.error; }
+            } catch (e) { /* Not a JSON error */ }
             throw new Error(errorMessage);
         }
 
@@ -167,9 +159,7 @@ cancelButton.addEventListener('click', () => {
 
 csvUploadInput.addEventListener('change', (event) => {
     const input = event.target;
-    if (!input.files || input.files.length === 0) {
-        return;
-    }
+    if (!input.files || input.files.length === 0) { return; }
 
     const file = input.files[0];
     const reader = new FileReader();
@@ -193,10 +183,7 @@ csvUploadInput.addEventListener('change', (event) => {
         }
     };
 
-    reader.onerror = () => {
-        alert('Error reading the file.');
-    };
-    
+    reader.onerror = () => { alert('Error reading the file.'); };
     reader.readAsText(file);
     input.value = ''; // Allow re-uploading the same file
 });
@@ -206,8 +193,6 @@ csvUploadInput.addEventListener('change', (event) => {
 
 /**
  * Handles events from the backend stream to update the UI in real-time.
- * @param {string} event The name of the event.
- * @param {object} data The data payload for the event.
  */
 function handleStreamEvent(event, data) {
     try {
@@ -215,21 +200,38 @@ function handleStreamEvent(event, data) {
             case 'status':
                 buttonText.textContent = data;
                 break;
-            case 'generated_domains':
-                updateSummary(0, data.domains.length, 0);
+
+            case 'domain_list':
+                placeholderResults.style.display = 'none';
+                resultsView.style.display = 'block';
+                resultsView.innerHTML = data.domains.map(domain => `
+                    <div class="domain-result-row" id="domain-row-${domain.replace(/\./g, '-')}">
+                        <span class="domain-name">${domain}</span>
+                        <span class="domain-status checking...">Checking...</span>
+                    </div>
+                `).join('');
                 break;
-            case 'progress':
-                updateProgress(data.checked, data.total);
-                updateSummary(data.checked, data.total, data.available);
+
+            case 'domain_result':
+                const row = document.getElementById(`domain-row-${data.domain.replace(/\./g, '-')}`);
+                if (row) {
+                    const statusEl = row.querySelector('.domain-status');
+                    statusEl.textContent = data.availability;
+                    // Use class names that are valid, e.g., 'checking' instead of 'checking...'
+                    statusEl.className = 'domain-status ' + data.availability.toLowerCase().replace(/[^a-z]/g, '');
+                    if (data.availability === 'Available') {
+                        availableDomains.push(data.domain);
+                    }
+                }
                 break;
-            case 'results':
-                displayResults(data.categorized, data.allAvailable);
-                displayActions();
+            
+            case 'finished':
+                if (availableDomains.length > 0) {
+                    displayActions();
+                }
+                buttonText.textContent = "Finished!";
                 break;
-            case 'no_results':
-                 placeholderResults.innerHTML = '<p>No available domains found from the list.</p>';
-                 placeholderResults.style.display = 'block';
-                break;
+
             case 'error':
                 throw new Error(`Backend error: ${data.message}`);
         }
@@ -241,90 +243,12 @@ function handleStreamEvent(event, data) {
     }
 }
 
-
-function updateProgress(checked, total) {
-    const percentage = total > 0 ? (checked / total) * 100 : 0;
-    progressBar.value = percentage;
-}
-
-function updateSummary(checked, total, availableCount) {
-    summaryContainer.innerHTML = `
-        <div class="summary-item">
-            <h3>Checked / Total</h3>
-            <p>${checked} / ${total}</p>
-        </div>
-        <div class="summary-item">
-            <div class="summary-header">
-                <h3>Available</h3>
-            </div>
-            <p style="color: var(--success-color);">${availableCount}</p>
-        </div>
-    `;
-}
-
-function displayResults(categorizedDomains, allAvailableDomains) {
-    if (categorizedDomains.length === 0) return;
-
-     const summaryHeader = summaryContainer.querySelector('.summary-item:last-child .summary-header');
-    if (summaryHeader && allAvailableDomains.length > 0) {
-        summaryHeader.innerHTML += `<button id="copy-all-button" title="Copy all available domains">Copy All</button>`;
-        setupCopyListener('copy-all-button', allAvailableDomains.join('\n'));
-    }
-
-    placeholderResults.style.display = 'none';
-    resultsView.style.display = 'block';
-    resultsView.innerHTML = categorizedDomains.map((cat, index) => `
-        <details class="category-accordion" ${index === 0 ? 'open' : ''}>
-            <summary>
-                <div class="category-header">
-                    <h2>${cat.category} (${cat.domains.length})</h2>
-                    <button class="copy-cat-button" data-category-index="${index}" title="Copy domains in this category">Copy</button>
-                </div>
-            </summary>
-            <div class="domain-list">
-                ${cat.domains.map(d => `<p>${d}</p>`).join('')}
-            </div>
-        </details>
-    `).join('');
-    
-    document.querySelectorAll('.copy-cat-button').forEach(button => {
-        const catIndex = parseInt(button.dataset.categoryIndex, 10);
-        const domainsToCopy = categorizedDomains[catIndex].domains.join('\n');
-        setupCopyListener(button, domainsToCopy);
-    });
-}
-
 function displayActions() {
     actionsContainer.innerHTML = `
         <a href="https://www.namecheap.com/domains/registration/results/?type=beast" target="_blank" rel="noopener noreferrer" class="action-button">
             Bulk Register on Namecheap
         </a>
     `;
-}
-
-function setupCopyListener(buttonOrId, textToCopy) {
-    const button = typeof buttonOrId === 'string' ? document.getElementById(buttonOrId) : buttonOrId;
-    if (!button) return;
-
-    const newButton = button.cloneNode(true);
-    button.parentNode.replaceChild(newButton, button);
-
-    const handler = () => {
-        navigator.clipboard.writeText(textToCopy).then(() => {
-            const originalText = newButton.textContent;
-            newButton.textContent = 'Copied!';
-            newButton.disabled = true;
-            setTimeout(() => {
-                newButton.textContent = originalText;
-                newButton.disabled = false;
-            }, 2000);
-        }).catch(err => {
-            console.error('Failed to copy: ', err);
-            alert('Failed to copy.');
-        });
-    };
-
-    newButton.addEventListener('click', handler);
 }
 
 function setLoading(isLoading) {
@@ -337,15 +261,12 @@ function setLoading(isLoading) {
         spinner.style.display = 'block';
         analyzeButton.style.width = '50px';
         cancelButton.style.display = 'inline-flex';
-        progressContainer.style.display = 'block';
-        progressBar.value = 0;
     } else {
         analyzeButton.disabled = false;
         buttonText.style.display = 'inline';
         spinner.style.display = 'none';
         analyzeButton.style.width = '';
         cancelButton.style.display = 'none';
-        progressContainer.style.display = 'none';
         setMode(currentMode);
     }
 }
@@ -353,12 +274,10 @@ function setLoading(isLoading) {
 function clearResults() {
     resultsView.innerHTML = '';
     resultsView.style.display = 'none';
-    summaryContainer.innerHTML = '';
     actionsContainer.innerHTML = '';
-    placeholderResults.innerHTML = '<p>Your availability results will appear here.</p>';
+    placeholderResults.innerHTML = '<p>Your availability results will appear here, updated in real-time.</p>';
     placeholderResults.style.display = 'block';
-    progressContainer.style.display = 'none';
-    progressBar.value = 0;
+    availableDomains = []; // Reset available domains list
 }
 
 // Initialize default mode
