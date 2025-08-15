@@ -55,7 +55,7 @@ export default async function handler(req) {
                     if (mode === 'generator') {
                         if (!keywords || !tlds) throw new Error('Keywords and TLDs are required for generator mode.');
                         
-                        const prompt = `Generate a creative list of 30 domain names based on the following keywords: "${keywords}". Only include domains with the following extensions (TLDs): ${tlds}. The output should be a single plain text list of domain names, one per line. Do not include any other text or formatting.`;
+                        const prompt = `Generate a creative list of 20 domain names based on the following keywords: "${keywords}". Only include domains with the following extensions (TLDs): ${tlds}. The output should be a single plain text list of domain names, one per line. Do not include any other text or formatting.`;
                         
                         writeToStream(encoder, writer, 'status', 'Generating domain ideas...');
                         const genResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
@@ -89,27 +89,51 @@ export default async function handler(req) {
                     // --- Step 3: Categorize Available Domains ---
                     if (allAvailableDomains.length > 0) {
                         writeToStream(encoder, writer, 'status', 'Categorizing available domains...');
-                        const prompt = `Categorize the following list of available domain names into logical groups like "Business", "Technology", "Creative", "Short & Brandable", etc. The domains are: ${allAvailableDomains.join(', ')}`;
+                        let categorizedDomains;
 
-                        const catResponse = await ai.models.generateContent({
-                            model: 'gemini-2.5-flash',
-                            contents: prompt,
-                            config: {
-                                responseMimeType: "application/json",
-                                responseSchema: {
-                                    type: Type.ARRAY,
-                                    items: {
-                                        type: Type.OBJECT,
-                                        properties: {
-                                            category: { type: Type.STRING },
-                                            domains: { type: Type.ARRAY, items: { type: Type.STRING } }
+                        try {
+                            const prompt = `Categorize the following list of available domain names into logical groups like "Business", "Technology", "Creative", "Short & Brandable", etc. The domains are: ${allAvailableDomains.join(', ')}`;
+
+                            const catResponse = await ai.models.generateContent({
+                                model: 'gemini-2.5-flash',
+                                contents: prompt,
+                                config: {
+                                    responseMimeType: "application/json",
+                                    responseSchema: {
+                                        type: Type.ARRAY,
+                                        items: {
+                                            type: Type.OBJECT,
+                                            properties: {
+                                                category: { 
+                                                    type: Type.STRING,
+                                                    description: 'The name of the category for the domains (e.g., "Creative", "Business").'
+                                                },
+                                                domains: { 
+                                                    type: Type.ARRAY, 
+                                                    items: { type: Type.STRING },
+                                                    description: 'A list of the domain names that belong to this category.'
+                                                }
+                                            }
                                         }
                                     }
                                 }
+                            });
+                            
+                            const parsedResult = JSON.parse(catResponse.text);
+
+                            // Ensure the result is a non-empty array with valid-looking objects
+                            if (Array.isArray(parsedResult) && parsedResult.length > 0 && parsedResult[0].category && parsedResult[0].domains) {
+                                categorizedDomains = parsedResult;
+                            } else {
+                                // This handles cases where Gemini returns `[]` or an invalid structure
+                                throw new Error('Categorization result was empty or invalid.');
                             }
-                        });
+                        } catch (categorizationError) {
+                            console.error("AI categorization failed, using fallback:", categorizationError.message);
+                            // Fallback: return a single "Uncategorized" bucket
+                            categorizedDomains = [{ category: "Available Domains", domains: allAvailableDomains }];
+                        }
                         
-                        const categorizedDomains = JSON.parse(catResponse.text);
                         writeToStream(encoder, writer, 'results', { categorized: categorizedDomains, allAvailable: allAvailableDomains });
                     } else {
                         writeToStream(encoder, writer, 'no_results', {});
