@@ -1,4 +1,5 @@
 
+
 import { GoogleGenAI, Type } from '@google/genai';
 
 // Helper to write Server-Sent Events to the stream
