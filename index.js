@@ -2,7 +2,6 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
-import { GoogleGenAI, Type } from "@google/genai";
 
 // --- DOM Element Selectors ---
 const domainInput = document.getElementById('domain-input');
@@ -32,12 +31,7 @@ let currentMode = 'checker';
 let isProcessingCancelled = false;
 
 // --- API Configuration ---
-// Use a relative URL. Vercel automatically routes requests starting with /api
-// to the serverless function in the /api directory.
-const BACKEND_API_URL = '/api/check-domains';
-
-// --- Gemini API Initialization ---
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const API_ORCHESTRATOR_URL = '/api/orchestrator';
 
 // --- Mode Switching Logic ---
 function setMode(mode) {
@@ -77,102 +71,23 @@ function normalizeDomain(domainStr) {
     return cleanedDomain;
 }
 
-/**
- * Checks a batch of domains by calling the backend service.
- * This version throws an error on failure, which is caught by the caller.
- */
-async function checkDomainsWithBackend(domains) {
-    const response = await fetch(BACKEND_API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domains }),
-    });
-
-    if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Backend API error:', response.status, errorText);
-        // Throw an error to be caught by the calling function's try/catch block
-        throw new Error(`Backend API failed with status ${response.status}: ${errorText}`);
-    }
-    
-    const results = await response.json();
-    return results;
-}
-
-
-/**
- * Uses Gemini API to generate domain ideas.
- */
-async function generateDomainIdeas(keywords, tlds) {
-    const prompt = `Generate a creative list of 30 domain names based on the following keywords: "${keywords}".
-    Only include domains with the following extensions (TLDs): ${tlds}.
-    The output should be a single plain text list of domain names, one per line. Do not include any other text or formatting.`;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-        const domains = response.text.trim().split('\n').filter(Boolean);
-        return domains;
-    } catch (error) {
-        console.error("Error generating domain ideas:", error);
-        alert("Could not generate domain ideas. Please check the console for details.");
-        return [];
-    }
-}
-
-/**
- * Uses Gemini API to categorize a list of available domains.
- */
-async function categorizeDomains(domains) {
-    if (domains.length === 0) return [];
-    const prompt = `Categorize the following list of domain names into logical groups like "Business", "Technology", "Creative", "Short & Brandable", etc. The domains are: ${domains.join(', ')}`;
-    
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                        type: Type.OBJECT,
-                        properties: {
-                            category: { type: Type.STRING, description: 'The name of the category.' },
-                            domains: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'The domains in this category.' }
-                        }
-                    }
-                }
-            }
-        });
-
-        return JSON.parse(response.text);
-    } catch(error) {
-        console.error("Error categorizing domains:", error);
-        // Fallback: return a single "Uncategorized" bucket
-        return [{ category: "Available Domains", domains }];
-    }
-}
-
-
-// --- Main Event Handlers ---
+// --- Main Event Handler (Handles Streaming Response) ---
 analyzeButton.addEventListener('click', async () => {
     setLoading(true);
     clearResults();
     isProcessingCancelled = false;
 
-    let domains = [];
+    let requestBody = {};
 
     if (currentMode === 'checker') {
         const rawDomains = domainInput.value.split('\n').map(d => d.trim()).filter(Boolean);
-        domains = [...new Set(rawDomains.map(normalizeDomain))];
+        const domains = [...new Set(rawDomains.map(normalizeDomain))];
         if (domains.length === 0) {
             alert("Please paste a list of domains.");
             setLoading(false);
             return;
         }
+        requestBody = { mode: 'checker', domains };
     } else { // Generator mode
         const keywords = keywordsInput.value;
         const tlds = tldsInput.value;
@@ -181,55 +96,52 @@ analyzeButton.addEventListener('click', async () => {
             setLoading(false);
             return;
         }
-        buttonText.textContent = "Generating...";
-        domains = await generateDomainIdeas(keywords, tlds);
-        if (domains.length === 0) {
-            setLoading(false);
-            return;
-        }
+        requestBody = { mode: 'generator', keywords, tlds };
     }
     
     try {
-        const BATCH_SIZE = 50;
-        let checkedCount = 0;
-        const totalDomains = domains.length;
-        const allAvailableDomains = [];
-        
-        // Initial summary display
-        updateSummary(checkedCount, totalDomains, allAvailableDomains);
+        const response = await fetch(API_ORCHESTRATOR_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody),
+        });
 
-        for (let i = 0; i < totalDomains; i += BATCH_SIZE) {
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Request failed with status ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
             if (isProcessingCancelled) {
-                console.log("Processing cancelled by user.");
+                reader.cancel('User cancelled');
+                placeholderResults.innerHTML = '<p>Process cancelled.</p>';
                 break;
             }
 
-            const batch = domains.slice(i, i + BATCH_SIZE);
-            const results = await checkDomainsWithBackend(batch);
-            
-            const availableInBatch = results
-                .filter(r => r.availability === 'Available')
-                .map(r => r.domain);
-            allAvailableDomains.push(...availableInBatch);
+            const { value, done } = await reader.read();
+            if (done) break;
 
-            checkedCount += batch.length;
-            updateProgress(checkedCount, totalDomains);
-            updateSummary(checkedCount, totalDomains, allAvailableDomains);
-        }
-        
-        if (allAvailableDomains.length > 0) {
-            buttonText.textContent = "Categorizing...";
-            const categorized = await categorizeDomains(allAvailableDomains);
-            displayResults(categorized, allAvailableDomains); // Pass all for copy all button
-            displayActions();
-        } else {
-             placeholderResults.innerHTML = isProcessingCancelled ? '<p>Process cancelled.</p>' : '<p>No available domains found.</p>';
-             placeholderResults.style.display = 'block';
+            buffer += decoder.decode(value, { stream: true });
+            
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop(); // Keep the last, possibly incomplete, line
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const jsonString = line.substring(6);
+                    const { event, data } = JSON.parse(jsonString);
+                    handleStreamEvent(event, data);
+                }
+            }
         }
 
     } catch (error) {
         console.error("An unexpected error occurred:", error);
-        placeholderResults.innerHTML = `<p style="color: var(--error-color);">An unexpected error occurred. Please check the console.</p>`;
+        placeholderResults.innerHTML = `<p style="color: var(--error-color);">${error.message}</p>`;
         placeholderResults.style.display = 'block';
     } finally {
         setLoading(false);
@@ -264,7 +176,6 @@ csvUploadInput.addEventListener('change', (event) => {
         if (matches && matches.length > 0) {
             const uniqueDomains = [...new Set(matches.map(normalizeDomain))];
             domainInput.value = uniqueDomains.join('\n');
-            // Switch to checker mode if not already
             setMode('checker');
         } else {
             alert('No domains found in the file.');
@@ -282,14 +193,50 @@ csvUploadInput.addEventListener('change', (event) => {
 
 // --- UI Update Functions ---
 
+/**
+ * Handles events from the backend stream to update the UI in real-time.
+ * @param {string} event The name of the event.
+ * @param {object} data The data payload for the event.
+ */
+function handleStreamEvent(event, data) {
+    try {
+        switch (event) {
+            case 'status':
+                buttonText.textContent = data;
+                break;
+            case 'generated_domains':
+                updateSummary(0, data.domains.length, 0);
+                break;
+            case 'progress':
+                updateProgress(data.checked, data.total);
+                updateSummary(data.checked, data.total, data.available);
+                break;
+            case 'results':
+                displayResults(data.categorized, data.allAvailable);
+                displayActions();
+                break;
+            case 'no_results':
+                 placeholderResults.innerHTML = '<p>No available domains found from the list.</p>';
+                 placeholderResults.style.display = 'block';
+                break;
+            case 'error':
+                throw new Error(`Backend error: ${data.message}`);
+        }
+    } catch (error) {
+         console.error("Stream event handling error:", error);
+         placeholderResults.innerHTML = `<p style="color: var(--error-color);">${error.message}</p>`;
+         placeholderResults.style.display = 'block';
+         setLoading(false);
+    }
+}
+
+
 function updateProgress(checked, total) {
     const percentage = total > 0 ? (checked / total) * 100 : 0;
     progressBar.value = percentage;
 }
 
-function updateSummary(checked, total, availableDomains) {
-    const availableCount = availableDomains.length;
-
+function updateSummary(checked, total, availableCount) {
     summaryContainer.innerHTML = `
         <div class="summary-item">
             <h3>Checked / Total</h3>
@@ -305,11 +252,8 @@ function updateSummary(checked, total, availableDomains) {
 }
 
 function displayResults(categorizedDomains, allAvailableDomains) {
-    if (categorizedDomains.length === 0) {
-        return;
-    }
+    if (categorizedDomains.length === 0) return;
 
-    // Add a final 'Copy All' button to the summary
      const summaryHeader = summaryContainer.querySelector('.summary-item:last-child .summary-header');
     if (summaryHeader && allAvailableDomains.length > 0) {
         summaryHeader.innerHTML += `<button id="copy-all-button" title="Copy all available domains">Copy All</button>`;
@@ -332,7 +276,6 @@ function displayResults(categorizedDomains, allAvailableDomains) {
         </details>
     `).join('');
     
-    // Add event listeners for the new copy buttons
     document.querySelectorAll('.copy-cat-button').forEach(button => {
         const catIndex = parseInt(button.dataset.categoryIndex, 10);
         const domainsToCopy = categorizedDomains[catIndex].domains.join('\n');
@@ -352,7 +295,6 @@ function setupCopyListener(buttonOrId, textToCopy) {
     const button = typeof buttonOrId === 'string' ? document.getElementById(buttonOrId) : buttonOrId;
     if (!button) return;
 
-    // Remove old listeners to prevent multiple fires by replacing the node.
     const newButton = button.cloneNode(true);
     button.parentNode.replaceChild(newButton, button);
 
@@ -375,7 +317,6 @@ function setupCopyListener(buttonOrId, textToCopy) {
 }
 
 function setLoading(isLoading) {
-    // Disable mode switch during processing
     modeCheckerButton.disabled = isLoading;
     modeGeneratorButton.disabled = isLoading;
 
@@ -383,7 +324,7 @@ function setLoading(isLoading) {
         analyzeButton.disabled = true;
         buttonText.style.display = 'none';
         spinner.style.display = 'block';
-        analyzeButton.style.width = '50px'; // Shrink to circle
+        analyzeButton.style.width = '50px';
         cancelButton.style.display = 'inline-flex';
         progressContainer.style.display = 'block';
         progressBar.value = 0;
@@ -391,10 +332,9 @@ function setLoading(isLoading) {
         analyzeButton.disabled = false;
         buttonText.style.display = 'inline';
         spinner.style.display = 'none';
-        analyzeButton.style.width = ''; // Reset width
+        analyzeButton.style.width = '';
         cancelButton.style.display = 'none';
         progressContainer.style.display = 'none';
-        // Reset button text based on mode after processing
         setMode(currentMode);
     }
 }
