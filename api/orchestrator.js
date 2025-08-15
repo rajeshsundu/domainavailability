@@ -1,11 +1,10 @@
+
 import { GoogleGenAI, Type } from '@google/genai';
 
 // Vercel Edge Functions environment config
 export const config = {
   runtime: 'edge',
 };
-
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Helper to write Server-Sent Events to the stream
 function writeToStream(encoder, writer, event, data) {
@@ -36,6 +35,15 @@ export default async function handler(req) {
     if (req.method !== 'POST') {
         return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: { 'Content-Type': 'application/json' } });
     }
+
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+        return new Response(JSON.stringify({ error: 'Server configuration error: The API_KEY is missing. Please ensure it is set in the Vercel project environment variables.' }), { 
+            status: 500, 
+            headers: { 'Content-Type': 'application/json' } 
+        });
+    }
+    const ai = new GoogleGenAI({ apiKey });
 
     try {
         const { mode, domains: initialDomains, keywords, tlds } = await req.json();
