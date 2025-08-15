@@ -262,132 +262,62 @@ button#analyze-button:disabled {
     100% { transform: rotate(360deg); }
 }
 
-#progress-container {
-    margin-bottom: 32px;
-}
-
-#progress-bar {
-    width: 100%;
-    height: 8px;
-    -webkit-appearance: none;
-    appearance: none;
-    border: none;
-    border-radius: 4px;
-    overflow: hidden;
-}
-#progress-bar::-webkit-progress-bar {
-    background-color: var(--border-color);
-}
-#progress-bar::-webkit-progress-value {
-    background-color: var(--primary-color);
-    transition: width 0.3s ease;
-}
-#progress-bar::-moz-progress-bar {
-    background-color: var(--primary-color);
-}
-
-
-#summary {
-    display: flex;
-    justify-content: center;
-    gap: 20px;
-    padding: 20px;
-    background-color: var(--card-background);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    margin-bottom: 32px;
-    text-align: center;
-    min-height: 95px;
-}
-
-.summary-item { flex-basis: 200px; }
-.summary-header { display: flex; justify-content: center; align-items: center; gap: 8px; margin-bottom: 4px; }
-.summary-item h3 { font-size: 1rem; color: var(--subtle-text); font-weight: 500; }
-.summary-item p { font-size: 1.5rem; font-weight: 700; }
-
-#copy-all-button {
-    background-color: var(--border-color);
-    color: var(--subtle-text);
-    border: none;
-    border-radius: 6px;
-    padding: 3px 10px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.2s, color 0.2s;
-}
-#copy-all-button:hover { background-color: var(--primary-color); color: white; }
-#copy-all-button:disabled {
-    background-color: var(--success-color);
-    color: white;
-    cursor: default;
-}
-
 .results-container {
     background-color: var(--card-background);
     border: 1px solid var(--border-color);
     border-radius: 8px;
     overflow: hidden;
+    margin-top: 24px;
 }
 
-.placeholder { padding: 80px 20px; text-align: center; color: var(--subtle-text); }
-
-#results-view .category-accordion {
-    border-bottom: 1px solid var(--border-color);
-}
-#results-view .category-accordion:last-child {
-    border-bottom: none;
+.placeholder { 
+    padding: 80px 20px; 
+    text-align: center; 
+    color: var(--subtle-text); 
 }
 
-#results-view summary {
-    padding: 12px 16px;
-    cursor: pointer;
-    list-style: none;
-    transition: background-color 0.2s;
-}
-#results-view summary::-webkit-details-marker { display: none; }
-#results-view summary:hover { background-color: #f9fafb; }
-
-.category-header {
+.domain-result-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-}
-.category-header h2 {
-    font-size: 1.1rem;
-    font-weight: 600;
-}
-.copy-cat-button {
-    background-color: var(--border-color);
-    color: var(--subtle-text);
-    border: none;
-    border-radius: 6px;
-    padding: 4px 12px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background-color 0.2s, color 0.2s;
-}
-.copy-cat-button:hover {
-    background-color: var(--primary-color);
-    color: white;
-}
-.copy-cat-button:disabled {
-    background-color: var(--success-color);
-    color: white;
-    cursor: default;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-color);
 }
 
-.domain-list {
-    padding: 0 16px 16px;
-    background-color: #fdfdfd;
-}
-.domain-list p {
-    padding: 8px 0;
-    border-bottom: 1px solid #f1f5f9;
-}
-.domain-list p:last-child {
+.domain-result-row:last-child {
     border-bottom: none;
+}
+
+.domain-name {
+    font-weight: 500;
+}
+
+.domain-status {
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    text-transform: capitalize;
+}
+
+.domain-status.checking... {
+    color: var(--subtle-text);
+    background-color: var(--border-color);
+}
+
+.domain-status.available {
+    color: var(--success-color);
+    background-color: #ecfdf5;
+}
+
+.domain-status.unavailable {
+    color: #f43f5e; /* A slightly different red for contrast */
+    background-color: #fff1f2;
+}
+
+.domain-status.error {
+    color: var(--error-color);
+    background-color: #fef2f2;
 }
 
 #actions-container {
@@ -421,6 +351,5 @@ footer {
 @media (max-width: 768px) {
     #app { margin: 20px auto; padding: 15px; }
     header h1 { font-size: 2rem; }
-    #summary { flex-direction: column; gap: 16px; }
     .generator-inputs { grid-template-columns: 1fr; }
 }
