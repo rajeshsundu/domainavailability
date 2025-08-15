@@ -1,24 +1,10 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 
 // Helper to write Server-Sent Events to the stream
 function writeToStream(encoder, writer, event, data) {
     const jsonString = JSON.stringify({ event, data });
     writer.write(encoder.encode(`data: ${jsonString}\n\n`));
 }
-
-/**
- * Safely parses a JSON string that might be wrapped in markdown code fences.
- * @param {string} jsonString The potentially wrapped JSON string.
- * @returns {object} The parsed JavaScript object.
- */
-function safeJsonParse(jsonString) {
-    const cleanedString = jsonString
-        .trim()
-        .replace(/^```json\s*/, '')
-        .replace(/```$/, '');
-    return JSON.parse(cleanedString);
-}
-
 
 // Helper to check domain availability via Cloudflare DNS over HTTPS
 async function checkDomainAvailability(domain) {
@@ -46,7 +32,7 @@ export default async function handler(req) {
 
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
-        return new Response(JSON.stringify({ error: 'Server configuration error: The API_KEY is missing. Please ensure it is set in the Vercel project environment variables.' }), { 
+        return new Response(JSON.stringify({ error: 'Server configuration error: API_KEY is missing.' }), { 
             status: 500, 
             headers: { 'Content-Type': 'application/json' } 
         });
@@ -64,93 +50,40 @@ export default async function handler(req) {
                 try {
                     let domainsToCheck = initialDomains || [];
 
-                    // --- Step 1: Generate Domains ---
+                    // --- Step 1: Generate Domains (if in generator mode) ---
                     if (mode === 'generator') {
                         if (!keywords || !tlds) throw new Error('Keywords and TLDs are required for generator mode.');
                         
-                        const prompt = `Generate a creative list of 20 domain names based on the following keywords: "${keywords}". Only include domains with the following extensions (TLDs): ${tlds}. The output should be a single plain text list of domain names, one per line. Do not include any other text or formatting.`;
+                        const prompt = `Generate a creative list of 20 domain names based on the keywords: "${keywords}". Only include domains with TLDs: ${tlds}. Output a plain text list of domain names, one per line.`;
                         
-                        writeToStream(encoder, writer, 'status', 'Generating domain ideas...');
+                        writeToStream(encoder, writer, 'status', 'Generating ideas...');
                         const genResponse = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt });
                         
                         const generatedDomains = genResponse.text.trim().split('\n').filter(Boolean);
                         domainsToCheck = [...new Set(generatedDomains)];
-                        
-                        writeToStream(encoder, writer, 'generated_domains', { domains: domainsToCheck });
                     }
 
                     if (domainsToCheck.length === 0) throw new Error('No domains to check.');
 
-                    // --- Step 2: Check Availability ---
-                    writeToStream(encoder, writer, 'status', 'Checking domain availability...');
-                    const allAvailableDomains = [];
-                    const totalDomains = domainsToCheck.length;
-                    
-                    const BATCH_SIZE = 10;
-                    for (let i = 0; i < totalDomains; i += BATCH_SIZE) {
-                        const batch = domainsToCheck.slice(i, i + BATCH_SIZE);
-                        const promises = batch.map(checkDomainAvailability);
-                        const results = await Promise.all(promises);
+                    // --- Step 2: Send the full list to the client to render the initial UI ---
+                    writeToStream(encoder, writer, 'domain_list', { domains: domainsToCheck });
+                    writeToStream(encoder, writer, 'status', `Checking ${domainsToCheck.length} domains...`);
 
-                        const availableInBatch = results.filter(r => r.availability === 'Available').map(r => r.domain);
-                        allAvailableDomains.push(...availableInBatch);
-                        
-                        const checkedCount = Math.min(i + BATCH_SIZE, totalDomains);
-                        writeToStream(encoder, writer, 'progress', { checked: checkedCount, total: totalDomains, available: allAvailableDomains.length });
-                    }
-                    
-                    // --- Step 3: Categorize Available Domains ---
-                    if (allAvailableDomains.length > 0) {
-                        writeToStream(encoder, writer, 'status', 'Categorizing available domains...');
-                        let categorizedDomains;
+                    // --- Step 3: Check domains in parallel and stream results as they complete ---
+                    const checkPromises = domainsToCheck.map(domain =>
+                        checkDomainAvailability(domain)
+                            .then(result => {
+                                writeToStream(encoder, writer, 'domain_result', result);
+                            })
+                            .catch(err => {
+                                // This handles unexpected errors in checkDomainAvailability itself
+                                writeToStream(encoder, writer, 'domain_result', { domain, availability: 'Error' });
+                            })
+                    );
 
-                        try {
-                            const prompt = `Categorize the following list of available domain names into logical groups like "Business", "Technology", "Creative", "Short & Brandable", etc. The domains are: ${allAvailableDomains.join(', ')}`;
+                    await Promise.all(checkPromises);
 
-                            const catResponse = await ai.models.generateContent({
-                                model: 'gemini-2.5-flash',
-                                contents: prompt,
-                                config: {
-                                    responseMimeType: "application/json",
-                                    responseSchema: {
-                                        type: Type.ARRAY,
-                                        items: {
-                                            type: Type.OBJECT,
-                                            properties: {
-                                                category: { 
-                                                    type: Type.STRING,
-                                                    description: 'The name of the category for the domains (e.g., "Creative", "Business").'
-                                                },
-                                                domains: { 
-                                                    type: Type.ARRAY, 
-                                                    items: { type: Type.STRING },
-                                                    description: 'A list of the domain names that belong to this category.'
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                            
-                            const parsedResult = safeJsonParse(catResponse.text);
-
-                            // Ensure the result is a non-empty array with valid-looking objects
-                            if (Array.isArray(parsedResult) && parsedResult.length > 0 && parsedResult[0].category && parsedResult[0].domains) {
-                                categorizedDomains = parsedResult;
-                            } else {
-                                // This handles cases where Gemini returns `[]` or an invalid structure
-                                throw new Error('Categorization result was empty or invalid.');
-                            }
-                        } catch (categorizationError) {
-                            console.error("AI categorization failed, using fallback:", categorizationError.message);
-                            // Fallback: return a single "Uncategorized" bucket
-                            categorizedDomains = [{ category: "Available Domains", domains: allAvailableDomains }];
-                        }
-                        
-                        writeToStream(encoder, writer, 'results', { categorized: categorizedDomains, allAvailable: allAvailableDomains });
-                    } else {
-                        writeToStream(encoder, writer, 'no_results', {});
-                    }
+                    writeToStream(encoder, writer, 'finished', { message: 'All domains checked.' });
                     
                 } catch (error) {
                     console.error('Stream error:', error);
