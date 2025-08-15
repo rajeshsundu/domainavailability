@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Domain Finder & Generator</title>
+    <link rel="stylesheet" href="index.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script type="importmap">
+        {
+          "imports": {
+            "@google/genai": "https://esm.sh/@google/genai@^0.14.1"
+          }
+        }
+    </script>
+    <script type="module" src="index.js"></script>
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>AI Domain Finder & Generator</h1>
+            <p>Check a list of domains or generate new ideas with AI.</p>
+        </header>
+        <main>
+            <div class="mode-selector">
+                <button id="mode-checker" class="mode-button active" aria-pressed="true">Checker</button>
+                <button id="mode-generator" class="mode-button" aria-pressed="false">Generator</button>
+            </div>
+
+            <div id="checker-panel" class="input-panel">
+                <textarea id="domain-input" placeholder="Paste domains here, one per line..."></textarea>
+                <div class="divider-or"><span>or</span></div>
+                <div class="upload-container">
+                    <input type="file" id="csv-upload" class="file-input" accept=".csv, .txt" />
+                    <label for="csv-upload" class="upload-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <span>Upload a .csv or .txt file</span>
+                    </label>
+                </div>
+            </div>
+
+            <div id="generator-panel" class="input-panel" style="display: none;">
+                <div class="generator-inputs">
+                    <div class="form-group">
+                        <label for="keywords-input">Keywords</label>
+                        <input type="text" id="keywords-input" placeholder="e.g., AI, SaaS, marketing">
+                    </div>
+                    <div class="form-group">
+                        <label for="tlds-input">TLDs</label>
+                        <input type="text" id="tlds-input" value=".com, .io, .ai">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="main-actions">
+                <button id="analyze-button">
+                    <span class="button-text">Find Available Domains</span>
+                    <div class="spinner" style="display: none;"></div>
+                </button>
+                <button id="cancel-button" class="cancel-button" style="display: none;">Cancel</button>
+            </div>
+
+            <div id="progress-container" style="display: none;">
+                <progress id="progress-bar" value="0" max="100"></progress>
+            </div>
+
+            <div id="summary"></div>
+
+            <div class="results-container">
+                 <div id="results-view"></div>
+                 <div id="placeholder-results" class="placeholder">
+                    <p>Your availability results will appear here.</p>
+                </div>
+            </div>
+
+            <div id="actions-container"></div>
+        </main>
+        <footer>
+            <p>Powered by AI with real-time availability checks.</p>
+        </footer>
+    </div>
+</body>
+</html>
