@@ -1,6 +1,3 @@
-
-
-
 import { GoogleGenAI, Type } from '@google/genai';
 
 // Helper to write Server-Sent Events to the stream
@@ -8,6 +5,20 @@ function writeToStream(encoder, writer, event, data) {
     const jsonString = JSON.stringify({ event, data });
     writer.write(encoder.encode(`data: ${jsonString}\n\n`));
 }
+
+/**
+ * Safely parses a JSON string that might be wrapped in markdown code fences.
+ * @param {string} jsonString The potentially wrapped JSON string.
+ * @returns {object} The parsed JavaScript object.
+ */
+function safeJsonParse(jsonString) {
+    const cleanedString = jsonString
+        .trim()
+        .replace(/^```json\s*/, '')
+        .replace(/```$/, '');
+    return JSON.parse(cleanedString);
+}
+
 
 // Helper to check domain availability via Cloudflare DNS over HTTPS
 async function checkDomainAvailability(domain) {
@@ -121,7 +132,7 @@ export default async function handler(req) {
                                 }
                             });
                             
-                            const parsedResult = JSON.parse(catResponse.text);
+                            const parsedResult = safeJsonParse(catResponse.text);
 
                             // Ensure the result is a non-empty array with valid-looking objects
                             if (Array.isArray(parsedResult) && parsedResult.length > 0 && parsedResult[0].category && parsedResult[0].domains) {
