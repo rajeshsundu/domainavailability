@@ -107,8 +107,19 @@ analyzeButton.addEventListener('click', async () => {
         });
 
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || `Request failed with status ${response.status}`);
+            const errorText = await response.text();
+            console.error('Backend Error Response:', errorText);
+            let errorMessage = `The server returned an error (${response.status}). Please check the server logs on Vercel for more details.`;
+            // Try to parse it as JSON, as our function might return a valid JSON error
+            try {
+                const errorJson = JSON.parse(errorText);
+                if (errorJson.error) {
+                    errorMessage = errorJson.error;
+                }
+            } catch (e) {
+                // It wasn't a JSON error, stick with the generic message.
+            }
+            throw new Error(errorMessage);
         }
 
         const reader = response.body.getReader();
